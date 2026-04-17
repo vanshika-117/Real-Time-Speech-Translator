@@ -1,19 +1,15 @@
 import streamlit as st
 from deep_translator import GoogleTranslator
+import speech_recognition as sr
 from gtts import gTTS
 import tempfile
 import os
-import io
-import speech_recognition as sr
-from streamlit_mic_recorder import mic_recorder
 
 # Page config
 st.set_page_config(page_title="Speech Translator", layout="wide")
 
 st.title("🗣️ Real-Time Voice Conversation Translator")
 st.markdown("---")
-
-st.info("🎙️ Click record → speak → stop → translation + audio will appear")
 
 # 🌍 Languages
 language_options = {
@@ -35,8 +31,8 @@ language_options = {
 # Sidebar
 with st.sidebar:
     st.header("⚙️ Settings")
-    lang1 = st.selectbox("Speaker 1", list(language_options.keys()), index=0)
-    lang2 = st.selectbox("Speaker 2", list(language_options.keys()), index=1)
+    lang1 = st.selectbox("Speak", list(language_options.keys()), index=0)
+    lang2 = st.selectbox("Translate to", list(language_options.keys()), index=1)
 
 lang1_code = language_options[lang1]
 lang2_code = language_options[lang2]
@@ -48,7 +44,8 @@ if "turn" not in st.session_state:
 if "history" not in st.session_state:
     st.session_state.history = []
 
-# 🔊 Audio playback (reliable)
+
+# 🔊 Reliable audio playback (NO autoplay hack)
 def speak(text, lang):
     tts = gTTS(text=text, lang=lang, slow=False)
 
@@ -58,8 +55,10 @@ def speak(text, lang):
 
     tts.save(tmp_path)
 
-    with open(tmp_path, "rb") as f:
-        audio_bytes = f.read()
+    # Streamlit audio player (reliable every time)
+    audio_file = open(tmp_path, "rb")
+    audio_bytes = audio_file.read()
+    audio_file.close()
 
     os.remove(tmp_path)
 
@@ -70,32 +69,25 @@ col1, col2 = st.columns([3, 1])
 
 with col1:
     if st.session_state.turn == 0:
-        st.info(f"🎤 {lang1} - Speak now")
+        st.info(f"🎤 {lang1} Speaker : Speak Now")
     else:
-        st.info(f"🎤 {lang2} - Speak now")
+        st.info(f"🎤 {lang2} Speaker")
 
 with col2:
     if st.button("🗑️ Clear Chat", use_container_width=True):
         st.session_state.history = []
         st.session_state.turn = 0
 
-# 🎙️ Mic Recorder (browser-based)
-audio_data = mic_recorder(
-    start_prompt="🎙️ Start Recording",
-    stop_prompt="⏹️ Stop Recording",
-    use_container_width=True
-)
+# 🎙️ Record button
+record = st.button("🎙️ Speak Now", use_container_width=True)
 
-# 🎤 Process Audio
-if audio_data:
+# 🎤 Main Logic
+if record:
     try:
-        recognizer = sr.Recognizer()
-
-        audio_bytes = audio_data["bytes"]
-        audio_file = io.BytesIO(audio_bytes)
-
-        with sr.AudioFile(audio_file) as source:
-            audio = recognizer.record(source)
+        with sr.Microphone() as source:
+            st.warning("Listening... Speak now")
+            recognizer.adjust_for_ambient_noise(source, duration=0.5)
+            audio = recognizer.listen(source, timeout=10, phrase_time_limit=8)
 
         # Turn logic
         if st.session_state.turn == 0:
@@ -118,11 +110,11 @@ if audio_data:
             target=output_lang
         ).translate(text)
 
-        # Display
+        # Show text
         st.success(f"{speaker}: {text}")
         st.info(f"{listener}: {translated}")
 
-        # 🔊 Play translated voice
+        # 🔊 Play audio EVERY TIME (fixed)
         speak(translated, output_lang)
 
         # Save history
@@ -136,10 +128,9 @@ if audio_data:
     except Exception as e:
         st.error(f"❌ Error: {e}")
 
-# 💬 Conversation History
+# 💬 History
 if st.session_state.history:
     st.markdown("## 💬 Conversation")
-
     for s, t, l, tr in st.session_state.history:
         st.markdown(f"**{s}:** {t}")
         st.markdown(f"**{l}:** {tr}")
