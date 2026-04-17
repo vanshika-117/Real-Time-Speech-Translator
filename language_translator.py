@@ -4,15 +4,14 @@ import speech_recognition as sr
 from gtts import gTTS
 import tempfile
 import os
-import pyperclip
 
 # Page config
 st.set_page_config(page_title="Speech Translator", layout="wide")
 
-st.title("🗣️ Real-Time Speech Translator")
+st.title("🗣️ Real-Time Voice Conversation Translator")
 st.markdown("---")
 
-# Sidebar
+# 🌍 Languages
 language_options = {
     "English": "en",
     "Hindi": "hi",
@@ -29,96 +28,111 @@ language_options = {
     "Thai": "th"
 }
 
+# Sidebar
 with st.sidebar:
     st.header("⚙️ Settings")
+    lang1 = st.selectbox("Speak", list(language_options.keys()), index=0)
+    lang2 = st.selectbox("Translate to", list(language_options.keys()), index=1)
 
-    original_lang = st.selectbox("📍 Speak In:", list(language_options.keys()))
-    translated_lang = st.selectbox("🎯 Translate To:", list(language_options.keys()), index=1)
-
-original_lang_code = language_options[original_lang]
-translated_lang_code = language_options[translated_lang]
-
-if original_lang_code == translated_lang_code:
-    st.error("❌ Select different languages!")
+lang1_code = language_options[lang1]
+lang2_code = language_options[lang2]
 
 # Session state
+if "turn" not in st.session_state:
+    st.session_state.turn = 0
+
 if "history" not in st.session_state:
     st.session_state.history = []
 
-# Recognizer
 recognizer = sr.Recognizer()
 
-# 🎤 AUDIO INPUT (Streamlit Cloud compatible)
-audio_file = st.audio_input("🎙️ Click and record your speech")
+# 🔊 Reliable audio playback (NO autoplay hack)
+def speak(text, lang):
+    tts = gTTS(text=text, lang=lang, slow=False)
 
-if audio_file:
+    tmp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".mp3")
+    tmp_path = tmp_file.name
+    tmp_file.close()
+
+    tts.save(tmp_path)
+
+    # Streamlit audio player (reliable every time)
+    audio_file = open(tmp_path, "rb")
+    audio_bytes = audio_file.read()
+    audio_file.close()
+
+    os.remove(tmp_path)
+
+    st.audio(audio_bytes, format="audio/mp3")
+
+# Layout
+col1, col2 = st.columns([3, 1])
+
+with col1:
+    if st.session_state.turn == 0:
+        st.info(f"🎤 {lang1} Speaker : Speak Now")
+    else:
+        st.info(f"🎤 {lang2} Speaker")
+
+with col2:
+    if st.button("🗑️ Clear Chat", use_container_width=True):
+        st.session_state.history = []
+        st.session_state.turn = 0
+
+# 🎙️ Record button
+record = st.button("🎙️ Speak Now", use_container_width=True)
+
+# 🎤 Main Logic
+if record:
     try:
-        st.info("Processing audio...")
+        with sr.Microphone() as source:
+            st.warning("Listening... Speak now")
+            recognizer.adjust_for_ambient_noise(source, duration=0.5)
+            audio = recognizer.listen(source, timeout=10, phrase_time_limit=8)
 
-        # Save temp audio
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp:
-            tmp.write(audio_file.read())
-            audio_path = tmp.name
+        # Turn logic
+        if st.session_state.turn == 0:
+            input_lang = lang1_code
+            output_lang = lang2_code
+            speaker = lang1
+            listener = lang2
+        else:
+            input_lang = lang2_code
+            output_lang = lang1_code
+            speaker = lang2
+            listener = lang1
 
-        # Convert speech → text
-        with sr.AudioFile(audio_path) as source:
-            audio_data = recognizer.record(source)
-            spoken_text = recognizer.recognize_google(
-                audio_data,
-                language=original_lang_code
-            )
-
-        os.remove(audio_path)
+        # Speech → Text
+        text = recognizer.recognize_google(audio, language=input_lang)
 
         # Translate
-        translated_text = GoogleTranslator(
-            source='auto',
-            target=translated_lang_code
-        ).translate(spoken_text)
+        translated = GoogleTranslator(
+            source=input_lang,
+            target=output_lang
+        ).translate(text)
+
+        # Show text
+        st.success(f"{speaker}: {text}")
+        st.info(f"{listener}: {translated}")
+
+        # 🔊 Play audio EVERY TIME (fixed)
+        speak(translated, output_lang)
 
         # Save history
-        st.session_state.history.append((spoken_text, translated_text))
+        st.session_state.history.append((speaker, text, listener, translated))
 
-        # Display
-        col1, col2 = st.columns(2)
-
-        with col1:
-            st.subheader(f"🎤 {original_lang}")
-            st.code(spoken_text)
-
-        with col2:
-            st.subheader(f"🌐 {translated_lang}")
-            st.code(translated_text)
-
-        # 🔊 Text-to-Speech (Cloud-safe)
-        tts = gTTS(translated_text, lang=translated_lang_code)
-
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as tmp_audio:
-            tts.save(tmp_audio.name)
-            st.audio(tmp_audio.read(), format="audio/mp3")
-
-        os.remove(tmp_audio.name)
-
-        st.success("✅ Translation Complete!")
+        # Switch turn
+        st.session_state.turn = 1 - st.session_state.turn
 
     except sr.UnknownValueError:
-        st.warning("⚠️ Could not understand audio")
+        st.error("⚠️ Could not understand audio")
     except Exception as e:
         st.error(f"❌ Error: {e}")
 
-# Conversation History
+# 💬 History
 if st.session_state.history:
-    st.markdown("## 💬 Conversation History")
-
-    for i, (orig, trans) in enumerate(st.session_state.history):
-        col1, col2 = st.columns(2)
-
-        with col1:
-            st.code(orig)
-            if st.button("📋 Copy", key=f"o{i}"):
-                pyperclip.copy(orig)
-
-        with col2:
-            st.code(trans)
-            if st.button("📋 Copy", key=f"t{i}"):
-                pyperclip.copy(trans)
+    st.markdown("## 💬 Conversation")
+    for s, t, l, tr in st.session_state.history:
+        st.markdown(f"**{s}:** {t}")
+        st.markdown(f"**{l}:** {tr}")
+        st.markdown("---")
