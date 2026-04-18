@@ -3,17 +3,19 @@ from deep_translator import GoogleTranslator
 import speech_recognition as sr
 from gtts import gTTS
 import tempfile
-import os
+import base64
+import uuid
 
-# Page config
+# Page setup
 st.set_page_config(page_title="Speech Translator", layout="wide")
 
-st.title("🗣️ Real-Time Voice Conversation Translator")
+st.title("🗣️ Real-Time Speech Translator")
 st.markdown("---")
 
 # 🌍 Languages
 language_options = {
     "English": "en",
+    "Thai": "th",
     "Hindi": "hi",
     "Spanish": "es",
     "French": "fr",
@@ -24,15 +26,14 @@ language_options = {
     "Tamil": "ta",
     "Telugu": "te",
     "Malayalam": "ml",
-    "Kannada": "kn",
-    "Thai": "th"
+    "Kannada": "kn"
 }
 
 # Sidebar
 with st.sidebar:
     st.header("⚙️ Settings")
-    lang1 = st.selectbox("Speak", list(language_options.keys()), index=0)
-    lang2 = st.selectbox("Translate to", list(language_options.keys()), index=1)
+    lang1 = st.selectbox("Speak In", list(language_options.keys()), index=0)
+    lang2 = st.selectbox("Translate To", list(language_options.keys()), index=1)
 
 lang1_code = language_options[lang1]
 lang2_code = language_options[lang2]
@@ -44,34 +45,46 @@ if "turn" not in st.session_state:
 if "history" not in st.session_state:
     st.session_state.history = []
 
+if "last_audio" not in st.session_state:
+    st.session_state.last_audio = None
+    
+# Speech recognizer
+recognizer = sr.Recognizer()
 
-# 🔊 Reliable audio playback (NO autoplay hack)
+# 🔊 Auto speak function (best working method)
 def speak(text, lang):
-    tts = gTTS(text=text, lang=lang, slow=False)
+    try:
+        tts = gTTS(text=text, lang=lang)
 
-    tmp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".mp3")
-    tmp_path = tmp_file.name
-    tmp_file.close()
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as tmp:
+            tts.save(tmp.name)
 
-    tts.save(tmp_path)
+            with open(tmp.name, "rb") as f:
+                audio_bytes = f.read()
 
-    # Streamlit audio player (reliable every time)
-    audio_file = open(tmp_path, "rb")
-    audio_bytes = audio_file.read()
-    audio_file.close()
+        # ✅ store audio persistently
+        st.session_state.last_audio = audio_bytes
 
-    os.remove(tmp_path)
+        # 🔊 try autoplay
+        b64 = base64.b64encode(audio_bytes).decode()
 
-    st.audio(audio_bytes, format="audio/mp3")
+        st.markdown(f"""
+            <audio autoplay>
+                <source src="data:audio/mp3;base64,{b64}" type="audio/mp3">
+            </audio>
+        """, unsafe_allow_html=True)
 
+    except Exception as e:
+        st.error(f"Audio error: {e}")
+        
 # Layout
 col1, col2 = st.columns([3, 1])
 
 with col1:
     if st.session_state.turn == 0:
-        st.info(f"🎤 {lang1} Speaker : Speak Now")
+        st.info(f"🎤 {lang1} Speaker - Click to Speak")
     else:
-        st.info(f"🎤 {lang2} Speaker")
+        st.info(f"🎤 {lang2} Speaker - Click to Speak")
 
 with col2:
     if st.button("🗑️ Clear Chat", use_container_width=True):
@@ -81,15 +94,15 @@ with col2:
 # 🎙️ Record button
 record = st.button("🎙️ Speak Now", use_container_width=True)
 
-# 🎤 Main Logic
+# 🎤 Main logic
 if record:
     try:
         with sr.Microphone() as source:
             st.warning("Listening... Speak now")
             recognizer.adjust_for_ambient_noise(source, duration=0.5)
-            audio = recognizer.listen(source, timeout=10, phrase_time_limit=8)
+            audio = recognizer.listen(source, timeout=8, phrase_time_limit=8)
 
-        # Turn logic
+        # Speaker logic
         if st.session_state.turn == 0:
             input_lang = lang1_code
             output_lang = lang2_code
@@ -104,17 +117,17 @@ if record:
         # Speech → Text
         text = recognizer.recognize_google(audio, language=input_lang)
 
-        # Translate
+        # 🌐 Translation (FIXED)
         translated = GoogleTranslator(
             source=input_lang,
             target=output_lang
         ).translate(text)
 
-        # Show text
+        # Display
         st.success(f"{speaker}: {text}")
         st.info(f"{listener}: {translated}")
 
-        # 🔊 Play audio EVERY TIME (fixed)
+        # 🔊 Speak translation
         speak(translated, output_lang)
 
         # Save history
@@ -127,10 +140,24 @@ if record:
         st.error("⚠️ Could not understand audio")
     except Exception as e:
         st.error(f"❌ Error: {e}")
+        
+# 🔊 Always available fallback player
+# 🔊 Play last translation automatically (no player UI)
+if st.session_state.last_audio:
+    if st.button("🔊 Play Last Translation"):
 
-# 💬 History
+        b64 = base64.b64encode(st.session_state.last_audio).decode()
+
+        st.markdown(f"""
+            <audio autoplay>
+                <source src="data:audio/mp3;base64,{b64}" type="audio/mp3">
+            </audio>
+        """, unsafe_allow_html=True)
+        
+# 💬 Conversation
 if st.session_state.history:
     st.markdown("## 💬 Conversation")
+
     for s, t, l, tr in st.session_state.history:
         st.markdown(f"**{s}:** {t}")
         st.markdown(f"**{l}:** {tr}")
